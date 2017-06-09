@@ -20,6 +20,8 @@ public class Util {
         }
     }
 
+    // ugly hack from https://stackoverflow.com/questions/8742760/how-to-programmatically-set-discoverable-time-without-user-confirmation
+    // since the method is hidden.
     public static void makeDiscoverable(BluetoothAdapter adapter, int timeOut){
         try {
             setScanMode.invoke(adapter, BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE, timeOut);
