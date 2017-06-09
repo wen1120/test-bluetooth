@@ -27,7 +27,6 @@ import static trikita.anvil.DSL.*;
 public class MainActivity extends Activity {
 
     private BluetoothAdapter bTAdapter;
-    private boolean waiting = false;
     private List<BluetoothDevice> devices = new ArrayList<>();
     public static final String TAG = "TestBluetooth";
     private int state;
@@ -75,15 +74,13 @@ public class MainActivity extends Activity {
 
                     switchView(() -> {
                         checked(bTAdapter.isEnabled());
-                        enabled(!waiting);
+                        enabled(state == BluetoothAdapter.STATE_ON || state == BluetoothAdapter.STATE_OFF);
 
                         onCheckedChange((CompoundButton buttonView, boolean isChecked) -> {
                             if(isChecked) {
                                 bTAdapter.enable();
-                                waiting = true;
                             } else {
                                 bTAdapter.disable();
-                                waiting = true;
                             }
                         });
                     });
@@ -150,7 +147,6 @@ public class MainActivity extends Activity {
                             devices.clear();
                             break;
                     }
-                    waiting = false;
                     Anvil.render();
                     break;
                 case BluetoothAdapter.ACTION_SCAN_MODE_CHANGED:
