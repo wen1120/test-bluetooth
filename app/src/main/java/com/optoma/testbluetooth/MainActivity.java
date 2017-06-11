@@ -1,8 +1,10 @@
 package com.optoma.testbluetooth;
 
 import android.app.Activity;
+import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothHeadset;
 import android.bluetooth.BluetoothInputDevice;
 import android.bluetooth.BluetoothProfile;
 import android.content.BroadcastReceiver;
@@ -15,46 +17,61 @@ import android.widget.CompoundButton;
 import android.widget.LinearLayout;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 import trikita.anvil.Anvil;
 import trikita.anvil.RenderableView;
 import static trikita.anvil.DSL.*;
 
+//      ,----------------remove-------------------.
+//     v                                           \
+// [bonded]<--unbond--[bonded]<--disconnect--[connected]
+//      \                                          ^
+//       \________________add_____________________/
 
 public class MainActivity extends Activity {
 
-    private BluetoothAdapter btAdapter;
-    private List<BluetoothDevice> devices = new ArrayList<>();
     public static final String TAG = "TestBluetooth";
-    private int state;
-    private int scanMode;
-    private BluetoothInputDevice bid;
+    private static final int[] supportedProfiles = new int[] {
+            // Util.INPUT_DEVICE,
+            BluetoothProfile.A2DP,
+            // BluetoothProfile.HEADSET
+    };
+
+    private BluetoothAdapter adapter;
+    private List<BluetoothDevice> unbondedDevices = new ArrayList<>();
+    private List<BluetoothDevice> connectedDevices = new ArrayList<>();
+    private Map<Integer, BluetoothProfile> profiles = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        btAdapter = BluetoothAdapter.getDefaultAdapter();
+        adapter = BluetoothAdapter.getDefaultAdapter();
 
-        state = btAdapter.getState();
-        scanMode = btAdapter.getScanMode();
-
-        setContentView(createView());
+        setContentView(render());
 
         final IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothDevice.ACTION_FOUND);
         filter.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         filter.addAction(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
         filter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+        filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED);
+        filter.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        filter.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothInputDevice.ACTION_CONNECTION_STATE_CHANGED);
+        filter.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         registerReceiver(bReciever, filter);
 
-        if(!btAdapter.isDiscovering()) {
-            btAdapter.startDiscovery();
+        if(!adapter.isDiscovering()) {
+            adapter.startDiscovery();
         }
 
-        createInputDeviceProfile();
+        createProfiles();
     }
 
     @Override
@@ -73,43 +90,43 @@ public class MainActivity extends Activity {
                 case BluetoothAdapter.ACTION_DISCOVERY_FINISHED:
                     Anvil.render();
                     break;
-                case BluetoothDevice.ACTION_FOUND:
+                case BluetoothDevice.ACTION_FOUND: {
                     final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     // Log.d("ken", String.format("bluetooth device: %s ( %s )", device.getName(), device.getAddress()));
 
                     // BluetoothDevice#createRfcommSocketToServiceRecord}
                     // BluetoothAdapter#listenUsingRfcommWithServiceRecord}
 
-                    devices.add(device);
+                    unbondedDevices.add(device);
                     Anvil.render();
                     break;
-                case BluetoothAdapter.ACTION_STATE_CHANGED:
+                }
+                case BluetoothAdapter.ACTION_STATE_CHANGED: {
                     final int state = intent.getIntExtra(
                             BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
-                    switch(state) {
+                    switch (state) {
                         case BluetoothAdapter.STATE_ON:
                             Log.d("ken", "bluetooth on");
-                            devices.clear();
+                            unbondedDevices.clear();
 
-                            Util.makeDiscoverable(btAdapter, 300);
+                            Util.makeDiscoverable(adapter, 300);
 
-                            btAdapter.startDiscovery();
+                            adapter.startDiscovery();
                             break;
                         case BluetoothAdapter.STATE_OFF:
                             Log.d("ken", "bluetooth off");
-                            devices.clear();
+                            unbondedDevices.clear();
                             break;
                         case BluetoothAdapter.ERROR:
                             Log.d("ken", "bluetooth error");
-                            devices.clear();
+                            unbondedDevices.clear();
                             break;
                     }
                     Anvil.render();
                     break;
+                }
                 case BluetoothAdapter.ACTION_SCAN_MODE_CHANGED:
-                    scanMode = intent.getIntExtra(
-                            BluetoothAdapter.EXTRA_SCAN_MODE, BluetoothAdapter.ERROR);
-                    switch(scanMode) {
+                    switch (adapter.getScanMode()) {
                         case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
                             break;
                         case BluetoothAdapter.SCAN_MODE_CONNECTABLE:
@@ -120,20 +137,51 @@ public class MainActivity extends Activity {
                     Anvil.render();
                     break;
                 case BluetoothDevice.ACTION_BOND_STATE_CHANGED:
-                    final int bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
+                    final int currentState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
+                    final int previousState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR);
                     final BluetoothDevice bd = (BluetoothDevice) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    switch(bondState) {
+                    switch (currentState) {
                         case BluetoothDevice.BOND_NONE:
+                            if (previousState == BluetoothDevice.BOND_BONDED) {
+                                unbondedDevices.add(bd);
+                            }
                             break;
                         case BluetoothDevice.BOND_BONDING:
                             break;
                         case BluetoothDevice.BOND_BONDED:
-                            devices.remove(bd);
+                            unbondedDevices.remove(bd);
+                            connect(bd); // connect automatically once bonded
                             break;
                     }
 
                     Anvil.render();
                     break;
+
+                case BluetoothDevice.ACTION_ACL_CONNECTED:
+                case BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED:
+                case BluetoothDevice.ACTION_ACL_DISCONNECTED:
+                    Log.d("ken", "got ACL event!");
+                    break;
+                case BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED:
+                case BluetoothInputDevice.ACTION_CONNECTION_STATE_CHANGED:
+                case BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED: {
+                    final int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+                    final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    switch(state) {
+                        case BluetoothProfile.STATE_CONNECTED:
+                            connectedDevices.add(device);
+                            Log.d("ken", "device " + device.getName() + " connected");
+                            break;
+                        case BluetoothProfile.STATE_DISCONNECTED:
+                            connectedDevices.remove(device);
+                            Log.d("ken", "device " + device.getName() +" disconnected");
+                            break;
+                    }
+                    Anvil.render();
+                    break;
+                }
+
+
                 default:
                     break;
             }
@@ -141,34 +189,54 @@ public class MainActivity extends Activity {
         }
     };
 
-    public void createInputDeviceProfile() {
+    public void createProfiles() {
+
         final BluetoothProfile.ServiceListener profileListener = new BluetoothProfile.ServiceListener() {
             @Override
             public void onServiceConnected(int profile, BluetoothProfile proxy) {
-                if(profile == Util.INPUT_DEVICE) {
-                    bid = (BluetoothInputDevice) proxy;
-                    Anvil.render();
+                for(int i = 0; i<supportedProfiles.length; i++) {
+                    if(supportedProfiles[i] == profile) {
+                        profiles.put(profile, proxy);
+                        Anvil.render();
+                        return;
+                    }
                 }
             }
 
             @Override
             public void onServiceDisconnected(int profile) {
-                if(profile == Util.INPUT_DEVICE) {
-                    bid = null;
+                if(profiles.containsKey(profile)) {
+                    profiles.remove(profile);
                     Anvil.render();
                 }
             }
         };
 
-        btAdapter.getProfileProxy(this, profileListener, Util.INPUT_DEVICE);
+        for(int i = 0; i<supportedProfiles.length; i++) {
+            adapter.getProfileProxy(this, profileListener, supportedProfiles[i]);
+        }
 
     }
 
-    private static String getDeviceName(String s) {
-        return (s == null) ? "Unknown Device" : s;
+    private void connect(BluetoothDevice device) {
+        if(adapter.isDiscovering()) {
+            adapter.cancelDiscovery();
+        }
+        for(BluetoothProfile profile : profiles.values()) {
+            if(Util.connect(profile, device)) return;
+        }
+        Log.d("ken", "couldn't connect!");
     }
 
-    private RenderableView createView() {
+    private void disconnect(BluetoothDevice device) {
+
+    }
+
+    private boolean isConnected(BluetoothDevice device) {
+        return connectedDevices.contains(device);
+    }
+
+    private RenderableView render() {
         return new RenderableView(this) {
             @Override
             public void view() {
@@ -185,14 +253,15 @@ public class MainActivity extends Activity {
                         });
 
                         switchView(() -> {
-                            checked(btAdapter.isEnabled());
-                            enabled(state == BluetoothAdapter.STATE_ON || state == BluetoothAdapter.STATE_OFF);
+                            checked(adapter.isEnabled());
+                            enabled(adapter.getState() == BluetoothAdapter.STATE_ON ||
+                                    adapter.getState() == BluetoothAdapter.STATE_OFF);
 
                             onCheckedChange((CompoundButton buttonView, boolean isChecked) -> {
                                 if(isChecked) {
-                                    btAdapter.enable();
+                                    adapter.enable();
                                 } else {
-                                    btAdapter.disable();
+                                    adapter.disable();
                                 }
                             });
                         });
@@ -201,7 +270,7 @@ public class MainActivity extends Activity {
 
                     textView(() -> {
                         textSize(64);
-                        text(String.format("Discovering: %b", btAdapter.isDiscovering()));
+                        text(String.format("Discovering: %b", adapter.isDiscovering()));
                     });
 
                     textView(() -> {
@@ -210,7 +279,7 @@ public class MainActivity extends Activity {
                         boolean connectable = false;
                         boolean discoverable = false;
 
-                        switch(scanMode) {
+                        switch(adapter.getScanMode()) {
                             case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
                                 connectable = true;
                                 discoverable = true;
@@ -232,93 +301,21 @@ public class MainActivity extends Activity {
                             textView(() -> {
                                 textSize(64);
                                 text(String.format("Paired Devices (%d):",
-                                        btAdapter.getBondedDevices().size()));
+                                        adapter.getBondedDevices().size()));
                             });
 
-                            if(bid != null) {
-                                final List<BluetoothDevice> connected = bid.getConnectedDevices();
-                            }
-
-                            for(final BluetoothDevice bd: btAdapter.getBondedDevices()) {
-                                linearLayout(() -> {
-                                    textView(() -> {
-                                        text(String.format(
-                                                "%s", getDeviceName(bd.getName())));
-                                    });
-
-                                    space(() -> {
-                                        weight(1);
-                                    });
-
-                                    button(() -> {
-                                        text("Unpair");
-
-                                        onClick((view) -> {
-                                            Util.removeBond(bd);
-                                        });
-                                    });
-
-                                    if(bid != null) {
-                                        button(() -> {
-                                            if(bid.getConnectedDevices().contains(bd)) {
-                                                text("Disconnect");
-                                                onClick((view) -> {
-                                                    bid.disconnect(bd);
-                                                    if(bid.getConnectedDevices().isEmpty()) { // TODO
-                                                        btAdapter.startDiscovery();
-                                                    }
-                                                });
-                                            } else {
-                                                text("Connect");
-                                                onClick((view) -> {
-                                                    if(btAdapter.isDiscovering()) {
-                                                        btAdapter.cancelDiscovery();
-                                                    }
-                                                    bid.connect(bd);
-                                                });
-                                            }
-
-                                        });
-                                    }
-
-                                });
-
-
-                            }
+                            renderPairedDevices();
 
                             textView(() -> {
                                 textSize(64);
-                                text(String.format("Other Devices (%d):", devices.size()));
+                                text(String.format("Other Devices (%d):", unbondedDevices.size()));
                             });
 
-                            for(final BluetoothDevice bd : devices) {
-                                linearLayout(() -> {
-                                    textView(() -> {
+                            renderUnpairedDevices();
 
-                                        final String s = String.format("%s",
-                                                getDeviceName(bd.getName()));
-                                        text(s);
+                            editText(() -> {
 
-                                    });
-
-                                    space(() -> {
-                                        weight(1);
-                                    });
-
-                                    if(bd.getBondState() == BluetoothDevice.BOND_NONE ||
-                                            bd.getBondState() == BluetoothDevice.BOND_BONDING) {
-                                        button(() -> {
-                                            text("Pair");
-                                            enabled(bd.getBondState() == BluetoothDevice.BOND_NONE);
-
-                                            onClick((view) -> {
-                                                bd.createBond();
-                                            });
-                                        });
-                                    }
-                                });
-
-                            }
+                            });
 
                         });
                     });
@@ -326,6 +323,85 @@ public class MainActivity extends Activity {
             }
         };
     }
+
+    private void renderPairedDevices() {
+        for(final BluetoothDevice device: adapter.getBondedDevices()) {
+            linearLayout(() -> {
+                textView(() -> {
+                    text(String.format(
+                            "%s", getDeviceName(device.getName())));
+                });
+
+                space(() -> {
+                    weight(1);
+                });
+
+                button(() -> {
+                    text("Unpair");
+
+                    onClick((view) -> {
+                        Util.removeBond(device);
+                    });
+                });
+
+
+                button(() -> {
+                    if(isConnected(device)) {
+                        text("Disconnect");
+                        onClick((view) -> {
+                            disconnect(device);
+                        });
+                    } else {
+                        text("Connect");
+                        onClick((view) -> {
+                            connect(device);
+                        });
+                    }
+
+                });
+
+
+            });
+
+
+        }
+    }
+
+    private void renderUnpairedDevices() {
+        for(final BluetoothDevice device : unbondedDevices) {
+            linearLayout(() -> {
+                textView(() -> {
+
+                    final String s = String.format("%s",
+                            getDeviceName(device.getName()));
+                    text(s);
+
+                });
+
+                space(() -> {
+                    weight(1);
+                });
+
+                if(device.getBondState() == BluetoothDevice.BOND_NONE ||
+                        device.getBondState() == BluetoothDevice.BOND_BONDING) {
+                    button(() -> {
+                        text("Pair");
+                        enabled(device.getBondState() == BluetoothDevice.BOND_NONE);
+
+                        onClick((view) -> {
+                            device.createBond();
+                        });
+                    });
+                }
+            });
+
+        }
+    }
+
+    private static String getDeviceName(String s) {
+        return (s == null) ? "Unknown Device" : s;
+    }
+
 
 }
 

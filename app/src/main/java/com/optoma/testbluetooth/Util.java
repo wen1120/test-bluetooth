@@ -49,6 +49,28 @@ public class Util {
         }
     }
 
+    public static boolean connect(BluetoothProfile profile, BluetoothDevice device) {
+        return callProfileMethodWithDevice(profile, "connect", device);
 
+    }
+
+    public static boolean disconnect(BluetoothProfile profile, BluetoothDevice device) {
+        return callProfileMethodWithDevice(profile, "disconnect", device);
+    }
+
+    private static boolean callProfileMethodWithDevice(BluetoothProfile profile, String method, BluetoothDevice device) {
+        try {
+            final Method m = profile.getClass().getMethod(method, BluetoothDevice.class);
+            final boolean res = (Boolean) m.invoke(profile, device);
+            return res;
+        } catch (NoSuchMethodException e) {
+            e.printStackTrace();
+        } catch (InvocationTargetException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
 
 }
