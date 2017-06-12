@@ -3,6 +3,7 @@ package com.optoma.testbluetooth;
 import android.app.Activity;
 import android.bluetooth.BluetoothA2dp;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHeadset;
 import android.bluetooth.BluetoothInputDevice;
@@ -44,8 +45,8 @@ public class MainActivity extends Activity {
     static {
         supportedProfiles.put(0x1124, Util.INPUT_DEVICE);
         supportedProfiles.put(0x110b, BluetoothProfile.A2DP);
-        supportedProfiles.put(0x110b, BluetoothProfile.A2DP);
-        supportedProfiles.put(0x110e, Util.AVRCP_CONTROLLER);
+        supportedProfiles.put(0x111e, BluetoothProfile.HEADSET);
+//        supportedProfiles.put(0x110e, Util.AVRCP_CONTROLLER);
     };
 
     private BluetoothAdapter adapter;
@@ -94,6 +95,10 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         unregisterReceiver(bReciever);
+        for(int p : profiles.keySet()) {
+            adapter.closeProfileProxy(p, profiles.get(p));
+        }
+        profiles.clear();
     }
 
     private final BroadcastReceiver bReciever = new BroadcastReceiver() {
@@ -110,6 +115,7 @@ public class MainActivity extends Activity {
                     final BluetoothDevice device =
                             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     unbondedDevices.add(device);
+                    Log.d("ken", "found "+device);
                     Anvil.render();
                     break;
                 }
@@ -286,8 +292,16 @@ public class MainActivity extends Activity {
         Util.removeBond(device);
     }
 
+    // TODO: not reliable
+    // is connected by any profile
     private boolean isConnected(BluetoothDevice device) {
-        return connectedDevices.contains(device);
+        // return connectedDevices.contains(device);
+        for(BluetoothProfile profile : profiles.values()) {
+            if (profile.getConnectionState(device) == BluetoothProfile.STATE_CONNECTED) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isConnectable() {
@@ -400,7 +414,9 @@ public class MainActivity extends Activity {
         for(final BluetoothDevice device: adapter.getBondedDevices()) {
             linearLayout(() -> {
                 textView(() -> {
-                    text(getDeviceName(device.getName()));
+                    text(String.format("%s (%s)",
+                            getDeviceName(device.getName()), getDeviceClass(device)));
+
 
                     //text(String.format("%s %s",
                     //        getDeviceName(device.getName()),
@@ -414,6 +430,8 @@ public class MainActivity extends Activity {
 
                 button(() -> {
                     text("Remove");
+
+                    // enabled(isConnected(device));
 
                     onClick((view) -> {
                         disconnect(device);
@@ -448,8 +466,8 @@ public class MainActivity extends Activity {
             linearLayout(() -> {
                 textView(() -> {
 
-                    final String s = String.format("%s",
-                            getDeviceName(device.getName()));
+                    final String s = String.format("%s (%s)",
+                            getDeviceName(device.getName()), getDeviceClass(device));
                     text(s);
 
                 });
@@ -476,6 +494,37 @@ public class MainActivity extends Activity {
 
     private static String getDeviceName(String s) {
         return (s == null) ? "Unknown Device" : s;
+    }
+
+    private static String getDeviceClass(BluetoothDevice device) {
+        if(device == null) return "Unknown";
+        final int major = device.getBluetoothClass().getMajorDeviceClass();
+        switch(major) {
+            case BluetoothClass.Device.Major.AUDIO_VIDEO:
+                return "Audio/Video";
+            case BluetoothClass.Device.Major.COMPUTER:
+                return "Computer";
+            case BluetoothClass.Device.Major.HEALTH:
+                return "Health";
+            case BluetoothClass.Device.Major.IMAGING:
+                return "Imaging";
+            case BluetoothClass.Device.Major.MISC:
+                return "Misc";
+            case BluetoothClass.Device.Major.NETWORKING:
+                return "Networking";
+            case BluetoothClass.Device.Major.PERIPHERAL:
+                return "Peripheral";
+            case BluetoothClass.Device.Major.PHONE:
+                return "Phone";
+            case BluetoothClass.Device.Major.TOY:
+                return "Toy";
+            case BluetoothClass.Device.Major.UNCATEGORIZED:
+                return "Uncategorized";
+            case BluetoothClass.Device.Major.WEARABLE:
+                return "Wearable";
+            default:
+                return "Unknown";
+        }
     }
 
 
