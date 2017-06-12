@@ -21,8 +21,10 @@ import android.widget.LinearLayout;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import trikita.anvil.Anvil;
@@ -47,8 +49,8 @@ public class MainActivity extends Activity {
     };
 
     private BluetoothAdapter adapter;
-    private List<BluetoothDevice> unbondedDevices = new ArrayList<>();
-    private List<BluetoothDevice> connectedDevices = new ArrayList<>();
+    private Set<BluetoothDevice> unbondedDevices = new HashSet<>();
+    private Set<BluetoothDevice> connectedDevices = new HashSet<>();
     private Map<Integer, BluetoothProfile> profiles = new HashMap<>();
 
     @Override
@@ -73,11 +75,19 @@ public class MainActivity extends Activity {
         filter.addAction(BluetoothDevice.ACTION_UUID);
         registerReceiver(bReciever, filter);
 
+        createProfiles();
+
+        connectToBondedDevices();
+
         if(!adapter.isDiscovering()) {
             adapter.startDiscovery();
         }
+    }
 
-        createProfiles();
+    private void connectToBondedDevices() {
+        for(BluetoothDevice device : adapter.getBondedDevices()) {
+            device.fetchUuidsWithSdp();
+        }
     }
 
     @Override
@@ -97,9 +107,8 @@ public class MainActivity extends Activity {
                     Anvil.render();
                     break;
                 case BluetoothDevice.ACTION_FOUND: {
-                    final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    // Log.d("ken", String.format("bluetooth device: %s ( %s )", device.getName(), device.getAddress()));
-
+                    final BluetoothDevice device =
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     unbondedDevices.add(device);
                     Anvil.render();
                     break;
@@ -140,9 +149,12 @@ public class MainActivity extends Activity {
                     Anvil.render();
                     break;
                 case BluetoothDevice.ACTION_BOND_STATE_CHANGED: {
-                    final int currentState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
-                    final int previousState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR);
-                    final BluetoothDevice bd = (BluetoothDevice) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    final int currentState = intent.getIntExtra(
+                            BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
+                    final int previousState = intent.getIntExtra(
+                            BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR);
+                    final BluetoothDevice bd =
+                            (BluetoothDevice) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     switch (currentState) {
                         case BluetoothDevice.BOND_NONE:
                             break;
@@ -158,29 +170,42 @@ public class MainActivity extends Activity {
                     Anvil.render();
                     break;
                 }
-                case BluetoothDevice.ACTION_ACL_CONNECTED:
-                case BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED:
-                case BluetoothDevice.ACTION_ACL_DISCONNECTED:
-                    Log.d("ken", "got ACL event!");
-                    break;
-                case BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED:
-                case BluetoothInputDevice.ACTION_CONNECTION_STATE_CHANGED:
-                case BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED: {
-                    final int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+
+                // TODO: reliable?
+                case BluetoothDevice.ACTION_ACL_CONNECTED: {
                     final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    switch(state) {
-                        case BluetoothProfile.STATE_CONNECTED:
-                            connectedDevices.add(device);
-                            Log.d("ken", "device " + device.getName() + " connected");
-                            break;
-                        case BluetoothProfile.STATE_DISCONNECTED:
-                            connectedDevices.remove(device);
-                            Log.d("ken", "device " + device.getName() +" disconnected");
-                            break;
-                    }
+                    connectedDevices.add(device);
+                    Log.d("ken", device+" connected!");
                     Anvil.render();
                     break;
                 }
+                case BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED:
+                case BluetoothDevice.ACTION_ACL_DISCONNECTED: {
+                    final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    connectedDevices.remove(device);
+                    Log.d("ken", device+" disconnected!");
+                    Anvil.render();
+                    break;
+                }
+
+//                case BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED:
+//                case BluetoothInputDevice.ACTION_CONNECTION_STATE_CHANGED:
+//                case BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED: {
+//                    final int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+//                    final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+//                    switch(state) {
+//                        case BluetoothProfile.STATE_CONNECTED:
+//                            connectedDevices.add(device);
+//                            Log.d("ken", "device " + device.getName() + " connected");
+//                            break;
+//                        case BluetoothProfile.STATE_DISCONNECTED:
+//                            connectedDevices.remove(device);
+//                            Log.d("ken", "device " + device.getName() +" disconnected");
+//                            break;
+//                    }
+//                    Anvil.render();
+//                    break;
+//                }
                 case BluetoothDevice.ACTION_UUID: {
                     final BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                     final Parcelable[] pUuids = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID);
@@ -199,6 +224,7 @@ public class MainActivity extends Activity {
         }
     };
 
+    // TODO: make it lazier?
     public void createProfiles() {
 
         final BluetoothProfile.ServiceListener profileListener = new BluetoothProfile.ServiceListener() {
@@ -223,36 +249,32 @@ public class MainActivity extends Activity {
 
     }
 
-    private void connect(BluetoothDevice device, Parcelable[] pUuids) {
+    // see https://www.bluetooth.com/specifications/assigned-numbers/service-discovery
+    private void connect(BluetoothDevice device, Parcelable[] pUuids) { // TODO: failed?
         if(adapter.isDiscovering()) {
             adapter.cancelDiscovery();
         }
         if(pUuids!=null) {
             for (int i = 0; i < pUuids.length; i++) {
-                // xxxx xxxx xxxx xxxx yyyy yyyy yyyy yyyy
-                final UUID uuid = ((ParcelUuid) pUuids[i]).getUuid();
-                // Log.d("ken", device.getName() + "'s UUID: " + uuid);
-                final long left64 = uuid.getMostSignificantBits();
-                // Log.d("ken", device.getName() + "'s most significant bits: " + Long.toHexString(uuid.getMostSignificantBits()));
-                // Log.d("ken", device.getName() + "'s least significant bits: " + Long.toHexString(uuid.getLeastSignificantBits()));
-                final Integer uuid16 = (int)((left64 >>> 32) & 0x0000ffff);
-                // Log.d("ken", device.getName() + "'s UUID16: " + Integer.toHexString(uuid16));
 
-                // Log.d("ken", Arrays.toString(supportedProfiles.entrySet().toArray()));
-                // Log.d("ken", Arrays.toString(profiles.entrySet().toArray()));
+                final Integer uuid16 = getUUID16((ParcelUuid) pUuids[i]);
 
                 if(supportedProfiles.containsKey(uuid16)) {
-                    // Log.d("ken", "supported profiles contains " + uuid16);
+
                     final Integer p = supportedProfiles.get(uuid16);
                     if(profiles.containsKey(p)) {
-                        // Log.d("ken", "profiles contains " + p);
-                        if(Util.connect(profiles.get(p), device)) {
-                            // Log.d("ken", String.format("connected to %s using profile %s", device, profiles.get(p)));
-                        }
+                        Util.connect(profiles.get(p), device);
                     }
                 }
             }
         }
+    }
+
+    // see https://stackoverflow.com/questions/36212020/how-can-i-convert-a-bluetooth-16-bit-service-uuid-into-a-128-bit-uuid
+    private int getUUID16(ParcelUuid pUuid) {
+        final UUID uuid = pUuid.getUuid();
+        final long left64 = uuid.getMostSignificantBits();
+        return (int)((left64 >>> 32) & 0x0000ffff);
     }
 
     private void disconnect(BluetoothDevice device) {
@@ -261,10 +283,37 @@ public class MainActivity extends Activity {
                 Util.disconnect(profile, device);
             }
         }
+        Util.removeBond(device);
     }
 
     private boolean isConnected(BluetoothDevice device) {
         return connectedDevices.contains(device);
+    }
+
+    private boolean isConnectable() {
+        boolean connectable = false;
+
+        switch(adapter.getScanMode()) {
+            case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
+                connectable = true;
+                break;
+            case BluetoothAdapter.SCAN_MODE_CONNECTABLE:
+                connectable = true;
+                break;
+        }
+        return connectable;
+    }
+
+    private boolean isDiscoverable() {
+        boolean discoverable = false;
+
+        switch(adapter.getScanMode()) {
+            case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
+                discoverable = true;
+                break;
+
+        }
+        return discoverable;
     }
 
     private RenderableView render() {
@@ -273,6 +322,7 @@ public class MainActivity extends Activity {
             public void view() {
                 linearLayout(() -> {
                     orientation(LinearLayout.VERTICAL);
+                    padding(dip(12), dip(12));
 
                     linearLayout(() -> {
                         orientation(LinearLayout.HORIZONTAL);
@@ -300,29 +350,20 @@ public class MainActivity extends Activity {
                     });
 
                     textView(() -> {
-                        textSize(64);
+                        textSize(48);
                         text(String.format("Discovering: %b", adapter.isDiscovering()));
                     });
 
                     textView(() -> {
-                        textSize(64);
-
-                        boolean connectable = false;
-                        boolean discoverable = false;
-
-                        switch(adapter.getScanMode()) {
-                            case BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE:
-                                connectable = true;
-                                discoverable = true;
-                                break;
-                            case BluetoothAdapter.SCAN_MODE_CONNECTABLE:
-                                connectable = true;
-                                break;
-                        }
-
-                        text("Connectable: "+connectable);
-                        text("Discoverable: "+discoverable);
+                        textSize(48);
+                        text("Connectable: "+isConnectable());
                     });
+
+                    textView(() -> {
+                        textSize(48);
+                        text("Discoverable: "+isDiscoverable());
+                    });
+
 
                     scrollView(() -> {
 
@@ -331,7 +372,7 @@ public class MainActivity extends Activity {
 
                             textView(() -> {
                                 textSize(64);
-                                text(String.format("Paired Devices (%d):",
+                                text(String.format("Devices (%d):",
                                         adapter.getBondedDevices().size()));
                             });
 
@@ -359,8 +400,12 @@ public class MainActivity extends Activity {
         for(final BluetoothDevice device: adapter.getBondedDevices()) {
             linearLayout(() -> {
                 textView(() -> {
-                    text(String.format(
-                            "%s", getDeviceName(device.getName())));
+                    text(getDeviceName(device.getName()));
+
+                    //text(String.format("%s %s",
+                    //        getDeviceName(device.getName()),
+                    //        isConnected(device) ? "(V)" : "(X)")
+                    //);
                 });
 
                 space(() -> {
@@ -371,7 +416,7 @@ public class MainActivity extends Activity {
                     text("Remove");
 
                     onClick((view) -> {
-                        Util.removeBond(device);
+                        disconnect(device);
                     });
                 });
 
