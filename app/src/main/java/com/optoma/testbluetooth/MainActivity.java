@@ -229,7 +229,9 @@ public class MainActivity extends Activity {
     }
 
     private void disconnect(BluetoothDevice device) {
-
+        for(BluetoothProfile profile : profiles.values()) {
+            if (Util.disconnect(profile, device)) return;
+        }
     }
 
     private boolean isConnected(BluetoothDevice device) {
