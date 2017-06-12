@@ -19,6 +19,8 @@ public class Util {
     // https://stackoverflow.com/questions/26341718/connection-to-specific-hid-profile-bluetooth-device
     public static final int INPUT_DEVICE = 4;
 
+    public static final int AVRCP_CONTROLLER = 12;
+
     static {
         try {
             setScanMode = BluetoothAdapter.class.getMethod("setScanMode", int.class, int.class);
