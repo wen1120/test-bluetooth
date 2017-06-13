@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
     };
 
     private BluetoothAdapter adapter;
-    private Set<BluetoothDevice> unbondedDevices = new HashSet<>();
+    private List<BluetoothDevice> unbondedDevices = new ArrayList<>();
     private Set<BluetoothDevice> connectedDevices = new HashSet<>();
     private Map<Integer, BluetoothProfile> profiles = new HashMap<>();
 
@@ -114,7 +114,9 @@ public class MainActivity extends Activity {
                 case BluetoothDevice.ACTION_FOUND: {
                     final BluetoothDevice device =
                             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-                    unbondedDevices.add(device);
+                    if(!unbondedDevices.contains(device)) {
+                        unbondedDevices.add(device);
+                    }
                     Log.d("ken", "found "+device);
                     Anvil.render();
                     break;
@@ -269,7 +271,12 @@ public class MainActivity extends Activity {
 
                     final Integer p = supportedProfiles.get(uuid16);
                     if(profiles.containsKey(p)) {
-                        Util.connect(profiles.get(p), device);
+                        final BluetoothProfile bp = profiles.get(p);
+                        if(bp.getConnectionState(device) != BluetoothProfile.STATE_CONNECTED) {
+                            if (Util.connect(bp, device)) {
+                                return; // return on first success
+                            }
+                        }
                     }
                 }
             }
